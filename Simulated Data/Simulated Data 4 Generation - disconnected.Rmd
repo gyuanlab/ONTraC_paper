@@ -1,0 +1,350 @@
+## Generate simulation data using Dyngen
+
+```{r}
+library(tidyverse)
+library(dyngen)
+
+set.seed(12)
+
+backbone <- backbone_disconnected()
+
+init <- initialise_model(
+  backbone = backbone,
+  num_cells = 500,
+  num_tfs = 100,
+  num_targets = 0,
+  num_hks = 0,
+  simulation_params = simulation_default(census_interval = 10, ssa_algorithm = ssa_etl(tau = 300 / 3600)),
+  verbose = FALSE
+)
+```
+
+```{r}
+model <- generate_tf_network(init)
+model <- generate_feature_network(model)
+model <- generate_kinetics(model)
+model <- generate_gold_standard(model)
+model <- generate_cells(model)
+model <- generate_experiment(model)
+```
+
+## Save simulation data
+
+```{r}
+library(SingleCellExperiment)
+sce <- as_sce(model)
+```
+
+```{r}
+# Add noise
+colData(sce)$sim_time <- colData(sce)$sim_time + rnorm(nrow(colData(sce)), mean = 0, sd = 0.01 * colData(sce)$sim_time)
+colData(sce)$sim_time <- ifelse(colData(sce)$sim_time == 0, colData(sce)$sim_time + runif(sum(colData(sce)$sim_time == 0), 0.01, 1), colData(sce)$sim_time)
+colData(sce)
+```
+
+```{r}
+write_rds(sce, "simulation_data_branch_disconnected_with_noise.rds")
+```
+
+## Load simulation data
+
+```{r}
+library(scater)
+sce <- readRDS("simulation_data_branch_disconnected_with_noise.rds")
+sce
+```
+
+```{r}
+counts <- as.matrix(sce@assays@data$counts)
+write.table(counts, "simulation_disconnected_counts.csv")
+```
+
+```{r}
+library(uwot)
+set.seed(12)
+sce <- scater::logNormCounts(sce)
+sce <- scater::runPCA(sce)
+reducedDims(sce)
+plotPCA(sce)
+```
+
+## Color UMAP by time
+
+```{r}
+library(umap)
+library(fields)
+
+# Compute UMAP coordinates
+pca_coords <- reducedDims(sce)$PCA
+
+# Define a color gradient function based on sim_time values
+sim_time_colors <- colorRampPalette(c("blue", "red"))
+
+# Determine min and max sim_time values
+min_sim_time <- min(colData(sce)$sim_time)
+max_sim_time <- max(colData(sce)$sim_time)
+
+# Scale sim_time values to range [0, 1]
+scaled_sim_time <- (colData(sce)$sim_time - min_sim_time) / (max_sim_time - min_sim_time)
+
+# Map scaled sim_time values to colors using the gradient function
+sim_time_col <- sim_time_colors(length(unique(colData(sce)$sim_time)))[scaled_sim_time * (length(unique(colData(sce)$sim_time)) - 1) + 1]
+
+# Adjust plot margins to make space for the color bar and label
+par(mar = c(5, 4, 4, 7))  # Increased right margin to make space for the label
+
+# Plot PCA coordinates with sim_time colors
+plot(pca_coords, col = sim_time_col, pch = 16, main = "PCA with sim_time coloring", xlab = "PC1", ylab = "PC2")
+
+# Add a color bar with the label
+image.plot(
+  legend.only = TRUE,
+  col = sim_time_colors(100),
+  zlim = range(colData(sce)$sim_time),
+  legend.args = list(
+    text = "sim_time",  # Add back the label
+    side = 4,           # Position it on the right
+    font = 2,           # Bold font
+    line = 3.5          # Adjust label distance from the color bar
+  ),
+  legend.width = 1.5,   # Adjust width of the color bar
+  legend.mar = 5        # Add space between plot and color bar
+)
+
+```
+
+## Create pca_df
+
+```{r}
+pca_df <- as.data.frame(pca_coords)[1:2]
+pca_df$time <- colData(sce)$sim_time
+pca_df
+```
+
+## Assign lineage
+
+```{r}
+pca_df$trajectory_1 <- ifelse(pca_df$PC1 >= -20, 'true', 'false')
+
+pca_df$trajectory_2 <- ifelse(pca_df$PC1 < -20, 'true', 'false')
+
+pca_df$lineage <- ifelse(
+  pca_df$trajectory_1 == 'true', 1, 
+  ifelse(
+    pca_df$trajectory_2 == 'true', 2, NA
+  )
+)
+
+pca_df$trajectory_1 <- NULL
+pca_df$trajectory_2 <- NULL
+pca_df$trajectory_3 <- NULL
+
+
+# Display the data frame
+print(pca_df)
+```
+
+```{r}
+library(ggplot2)
+
+# Assuming umap_df is your data frame with UMAP coordinates and lineage column
+
+# Plot the UMAP with points colored by lineage
+ggplot(pca_df, aes(x = PC1, y = PC2, color = factor(lineage))) +
+  geom_point(size = 3) +
+  labs(x = "PC1", y = "PC2", title = "PCA Colored by Lineage") +
+  scale_color_manual(values = c("1" = "blue", "2" = "red", "3" = "green"), name = "Lineage") +
+  theme_minimal()
+```
+
+## Assign cell type
+
+```{r}
+pca_df$Cell_Type <- NA
+
+# Define the number of cell types for each lineage
+num_cell_types_lineage_1 <- 3  # A-C
+num_cell_types_lineage_2 <- 3  # D-F
+
+# Define the cell types
+cell_types_lineage_1 <- LETTERS[1:num_cell_types_lineage_1]
+cell_types_lineage_2 <- LETTERS[(num_cell_types_lineage_1 + 1):(num_cell_types_lineage_1 + num_cell_types_lineage_2)]
+
+# Calculate the number of cells per cell type for each lineage
+cells_per_cell_type_lineage_1 <- ceiling(nrow(pca_df[pca_df$lineage == 1, ]) / num_cell_types_lineage_1)
+cells_per_cell_type_lineage_2 <- ceiling(nrow(pca_df[pca_df$lineage == 2, ]) / num_cell_types_lineage_2)
+
+# Assign cell types based on time column for each lineage
+for (lineage in unique(pca_df$lineage)) {
+  if (lineage == 1) {
+    # Sort the data frame by time within lineage 1
+    pca_df_lineage_1 <- pca_df[pca_df$lineage == 1, ]
+    pca_df_lineage_1 <- pca_df_lineage_1[order(pca_df_lineage_1$time), ]
+
+    # Assign cell types A-G for lineage 1 based on time column
+    pca_df_lineage_1$Cell_Type <- rep(cell_types_lineage_1, each = cells_per_cell_type_lineage_1)[1:nrow(pca_df_lineage_1)]
+
+    # Update the original data frame with the assigned cell types for lineage 1
+    pca_df[pca_df$lineage == 1, ] <- pca_df_lineage_1
+  } else if (lineage == 2) {
+    # Sort the data frame by time within lineage 2
+    pca_df_lineage_2 <- pca_df[pca_df$lineage == 2, ]
+    pca_df_lineage_2 <- pca_df_lineage_2[order(pca_df_lineage_2$time), ]
+
+    # Assign cell types H-J for lineage 2 based on time column
+    pca_df_lineage_2$Cell_Type <- rep(cell_types_lineage_2, each = cells_per_cell_type_lineage_2)[1:nrow(pca_df_lineage_2)]
+
+    # Update the original data frame with the assigned cell types for lineage 2
+    pca_df[pca_df$lineage == 2, ] <- pca_df_lineage_2
+  }
+}
+
+# Display the updated data frame
+print(pca_df)
+```
+
+```{r}
+ggplot(pca_df, aes(x = PC1, y = PC2, color = Cell_Type)) +
+  geom_point(size = 1, alpha = 0.7) +
+  labs(x = "PC1", y = "PC2") +
+  theme_minimal() +
+  coord_fixed() +
+  theme(
+    panel.grid = element_blank(),  # Remove all grid lines
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  )
+
+ggsave(
+  filename = "simulation_3_celltype.svg",  # Output file name
+  plot = last_plot(),                    # Use the last plot created
+  dpi = 1000,                             # Resolution (dots per inch)
+  width = 4,                             # Width in inches
+  height = 4,                            # Height in inches
+  units = "in"                           # Units for width/height
+)
+```
+
+## Assign spatial coordinates
+
+```{r}
+# Initialize spatial coordinates
+pca_df$x <- NA
+pca_df$y <- NA
+
+# Define the boundary between lineage 1 and lineage 2 (absolute value)
+lineage_boundary <- 0.4
+
+# Process each lineage separately
+for (lineage in unique(pca_df$lineage)) {
+  # Get indices for current lineage
+  lineage_indices <- which(pca_df$lineage == lineage)
+  
+  # Get time values for current lineage
+  time_values <- pca_df$time[lineage_indices]
+  
+  if (lineage == 1) {
+    # Lineage 1: Spread from center (0) to boundary
+    # Sort indices by time for quantile-based transformation
+    sorted_indices <- order(time_values)
+    uniform_spread <- seq(0, lineage_boundary, length.out = length(lineage_indices))
+    
+    # Generate random signs (-1 or 1) for each cell
+    random_signs <- sample(c(-1, 1), length(lineage_indices), replace = TRUE)
+    
+    # Assign x coordinates using the uniform spread
+    x_coords <- numeric(length(lineage_indices))
+    x_coords[sorted_indices] <- uniform_spread
+    pca_df$x[lineage_indices] <- x_coords * random_signs
+    
+  } else if (lineage == 2) {
+    # Sort all lineage 2 cells by time
+    sorted_indices <- order(time_values)
+    
+    # Create alternating TRUE/FALSE vector for left/right assignment
+    is_left <- rep(c(TRUE, FALSE), length.out = length(lineage_indices))
+    
+    # Initialize x coordinates vector
+    x_coords <- numeric(length(lineage_indices))
+    
+    # Assign coordinates to left and right sides
+    left_indices <- sorted_indices[is_left]
+    right_indices <- sorted_indices[!is_left]
+    
+    # Ensure even spacing on both sides
+    left_spread <- seq(lineage_boundary, 1, length.out = length(left_indices))
+    right_spread <- seq(lineage_boundary, 1, length.out = length(right_indices))
+    
+    # Assign coordinates
+    # Left side: time increases from boundary (-0.4) to edge (-1)
+    x_coords[left_indices] <- -left_spread  # Remove rev() to maintain increasing time order
+    # Right side: time increases from boundary (0.4) to edge (1)
+    x_coords[right_indices] <- right_spread
+    
+    pca_df$x[lineage_indices] <- x_coords
+  }
+  
+  # Assign random y coordinates in [-1,1] range
+  pca_df$y[lineage_indices] <- runif(length(lineage_indices), min = -1, max = 1)
+}
+
+# Visualize the spatial layout
+ggplot(pca_df, aes(x = x, y = y, color = Cell_Type, shape = as.factor(lineage))) +
+  geom_point(size = 2) +
+  labs(
+       x = "X", 
+       y = "Y", 
+       color = "Cell Type", 
+       shape = "Lineage") +
+  theme_minimal() +
+  coord_equal() +  # Force 1:1 aspect ratio
+  scale_x_continuous(limits = c(-1, 1)) +
+  scale_y_continuous(limits = c(-1, 1)) +
+  coord_fixed() +
+  theme(
+    panel.grid = element_blank(),  # Remove all grid lines
+    panel.border = element_rect(color = "black", fill = NA, size = 1)
+  )
+
+ggsave(
+  filename = "simulation_disconnected_spatial.svg",  # Output file name
+  plot = last_plot(),                    # Use the last plot created
+  dpi = 1000,                             # Resolution (dots per inch)
+  width = 5,                             # Width in inches
+  height = 5,                            # Height in inches
+  units = "in"                           # Units for width/height
+)
+```
+
+```{r}
+ggplot(pca_df, aes(x = x, y = y, color = factor(lineage))) +
+  geom_point(size = 1) +
+  labs(x = "X", y = "Y", title = "Spatial Plot Colored by Lineage") +
+  scale_color_manual(values = c("1" = "blue", "2" = "red", "3" = "green"), name = "Lineage") +
+  theme_minimal() + theme(aspect.ratio=1)
+```
+
+```{r}
+ggplot(pca_df, aes(x = x, y = y, color = Cell_Type)) +
+  geom_point(size = 2) +
+  labs(x = "X", y = "Y", title = "Spatial Plot Colored by Cell Type") +
+  scale_color_manual(values = rainbow(length(unique(pca_df$Cell_Type))), name = "Cell Type") +
+  theme_minimal() + theme(aspect.ratio=1)
+```
+
+## Prepare input file
+
+```{r}
+library(data.table)
+
+ontrac_input <- data.table()
+ontrac_input$Cell_ID <- rownames(pca_df)
+ontrac_input$Sample <- paste("Sim_disconnected")
+ontrac_input$Cell_Type <- pca_df$Cell_Type
+ontrac_input$x <- pca_df$x
+ontrac_input$y <- pca_df$y
+ontrac_input
+```
+
+```{r}
+write.table(ontrac_input, file = "simulation_disconnected3_ontrac_input.csv", sep=",",row.names = FALSE)
+```

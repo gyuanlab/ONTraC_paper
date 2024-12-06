@@ -1,0 +1,334 @@
+## Generate simulation data using Dyngen
+
+```{r}
+library(tidyverse)
+library(dyngen)
+
+set.seed(1)
+
+backbone <- backbone_bifurcating()
+config <- 
+  initialise_model(
+    backbone = backbone,
+    num_tfs = nrow(backbone$module_info),
+    num_targets = 500,
+    num_hks = 500,
+    verbose = FALSE
+  )
+```
+
+```{r}
+config <-
+  initialise_model(
+    backbone = backbone,
+    num_cells = 1000,
+    num_tfs = nrow(backbone$module_info),
+    num_targets = 50,
+    num_hks = 50,
+    verbose = FALSE,
+    download_cache_dir = tools::R_user_dir("dyngen", "data"),
+    simulation_params = simulation_default(
+      total_time = 1000,
+      census_interval = 2, 
+      ssa_algorithm = ssa_etl(tau = 300/3600),
+      experiment_params = simulation_type_wild_type(num_simulations = 10)
+    )
+  )
+```
+
+```{r}
+model <- generate_tf_network(config)
+model <- generate_feature_network(model)
+model <- generate_kinetics(model)
+model <- generate_gold_standard(model)
+model <- generate_cells(model)
+model <- generate_experiment(model)
+```
+
+## Save simulation data
+
+```{r}
+library(SingleCellExperiment)
+sce <- as_sce(model)
+```
+
+```{r}
+# Add noise
+colData(sce)$sim_time <- colData(sce)$sim_time + rnorm(nrow(colData(sce)), mean = 0, sd = 0.01 * colData(sce)$sim_time)
+colData(sce)$sim_time <- ifelse(colData(sce)$sim_time == 0, colData(sce)$sim_time + runif(sum(colData(sce)$sim_time == 0), 0.01, 1), colData(sce)$sim_time)
+colData(sce)
+```
+
+```{r}
+write_rds(sce, "simulation_data_with_noise.rds")
+```
+
+## Load simulation data
+
+```{r}
+library(scater)
+sce <- readRDS("simulation_data_with_noise.rds")
+sce
+```
+
+```{r}
+library(uwot)
+set.seed(4)
+sce <- scater::logNormCounts(sce)
+sce <- scater::runPCA(sce)
+sce <- scater::runUMAP(sce)
+reducedDims(sce)
+```
+
+```{r}
+plotUMAP(sce)
+```
+
+## Color UMAP by time
+
+```{r}
+library(umap)
+library(fields)
+
+# Compute UMAP coordinates
+umap_coords <- reducedDims(sce)$UMAP
+
+# Define a color gradient function based on sim_time values
+sim_time_colors <- colorRampPalette(c("blue", "red"))
+
+# Determine min and max sim_time values
+min_sim_time <- min(colData(sce)$sim_time)
+max_sim_time <- max(colData(sce)$sim_time)
+
+# Scale sim_time values to range [0, 1]
+scaled_sim_time <- (colData(sce)$sim_time - min_sim_time) / (max_sim_time - min_sim_time)
+
+# Map scaled sim_time values to colors using the gradient function
+sim_time_col <- sim_time_colors(length(unique(colData(sce)$sim_time)))[scaled_sim_time * (length(unique(colData(sce)$sim_time)) - 1) + 1]
+
+# Plot UMAP with sim_time colors
+plot(umap_coords, col = sim_time_col, pch = 16, main = "UMAP with sim_time coloring")
+
+# Add color bar
+image.plot(legend.only = TRUE, col = sim_time_colors(100), zlim = range(colData(sce)$sim_time),
+           legend.args = list(text = "sim_time", side = 4, font = 2, line = 2.5))
+```
+
+## Create umap_df
+
+```{r}
+umap_df <- as.data.frame(umap_coords)
+umap_df$time <- colData(sce)$sim_time
+umap_df
+```
+
+## Assign lineage
+
+```{r}
+umap_df$trajectory_1 <- ifelse((umap_df$UMAP2 > 0) | (umap_df$UMAP2 < 0 & umap_df$UMAP1 < 0), 'true', 'false')
+
+# Create the 'trajectory_2' column
+umap_df$trajectory_2 <- ifelse(umap_df$UMAP2 <= 0 & umap_df$UMAP1 > 0, 'true', 'false')
+
+umap_df$lineage <- ifelse(umap_df$trajectory_1 == 'true', 1, ifelse(umap_df$trajectory_2 == 'true', 2, NA))
+
+umap_df$trajectory_1 <- NULL
+umap_df$trajectory_2 <- NULL
+
+# Display the data frame
+print(umap_df)
+```
+
+```{r}
+library(ggplot2)
+
+# Assuming umap_df is your data frame with UMAP coordinates and lineage column
+
+# Plot the UMAP with points colored by lineage
+ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = factor(lineage))) +
+  geom_point(size = 3) +
+  labs(x = "UMAP1", y = "UMAP2", title = "UMAP Plot Colored by Lineage") +
+  scale_color_manual(values = c("1" = "blue", "2" = "red"), name = "Lineage") +
+  theme_minimal()
+```
+
+## Assign cell type
+
+```{r}
+umap_df <- umap_df[order(umap_df$lineage, umap_df$time), ]
+cell_types <- c(rep(LETTERS[1:7], each = 100), rep(LETTERS[8:10], each = c(100, 100, 99)))
+umap_df$Cell_Type <- cell_types
+print(umap_df)
+```
+
+```{r}
+umap_df$Cell_Type <- NA
+
+time_list <- as.list(umap_df$time)
+
+# Define the number of cell types for each lineage
+num_cell_types_lineage_1 <- 7  # A-G
+num_cell_types_lineage_2 <- 3  # H-J
+
+# Define the cell types
+cell_types_lineage_1 <- LETTERS[1:num_cell_types_lineage_1]
+cell_types_lineage_2 <- LETTERS[(num_cell_types_lineage_1 + 1):(num_cell_types_lineage_1 + num_cell_types_lineage_2)]
+
+# Calculate the number of cells per cell type for each lineage
+cells_per_cell_type_lineage_1 <- ceiling(nrow(umap_df[umap_df$lineage == 1, ]) / num_cell_types_lineage_1)
+cells_per_cell_type_lineage_2 <- ceiling(nrow(umap_df[umap_df$lineage == 2, ]) / num_cell_types_lineage_2)
+
+# Assign cell types based on time column for each lineage
+for (lineage in unique(umap_df$lineage)) {
+  if (lineage == 1) {
+    # Sort the data frame by time within lineage 1
+    umap_df_lineage_1 <- umap_df[umap_df$lineage == 1, ]
+    umap_df_lineage_1 <- umap_df_lineage_1[order(umap_df_lineage_1$time), ]
+    
+    # Assign cell types A-G for lineage 1 based on time column
+    umap_df_lineage_1$Cell_Type <- rep(cell_types_lineage_1, each = cells_per_cell_type_lineage_1)[1:nrow(umap_df_lineage_1)]
+    
+    # Update the original data frame with the assigned cell types for lineage 1
+    umap_df[umap_df$lineage == 1, ] <- umap_df_lineage_1
+  } else if (lineage == 2) {
+    # Sort the data frame by time within lineage 2
+    umap_df_lineage_2 <- umap_df[umap_df$lineage == 2, ]
+    umap_df_lineage_2 <- umap_df_lineage_2[order(umap_df_lineage_2$time), ]
+    
+    # Assign cell types H-J for lineage 2 based on time column
+    umap_df_lineage_2$Cell_Type <- rep(cell_types_lineage_2, each = cells_per_cell_type_lineage_2)[1:nrow(umap_df_lineage_2)]
+    
+    # Update the original data frame with the assigned cell types for lineage 2
+    umap_df[umap_df$lineage == 2, ] <- umap_df_lineage_2
+  }
+}
+
+umap_df$time <- sapply(time_list, function(x) unlist(x))
+
+# Display the updated data frame
+print(umap_df)
+```
+
+```{r}
+ggplot(umap_df, aes(x = UMAP1, y = UMAP2, color = Cell_Type)) +
+  geom_point(size = 3) +
+  labs(x = "UMAP1", y = "UMAP2", title = "UMAP Plot Colored by Cell Type") +
+  scale_color_manual(values = rainbow(length(unique(umap_df$Cell_Type))), name = "Cell Type") +
+  theme_minimal()
+```
+
+## Assign spatial coordinates
+
+```{r}
+umap_df$r <- NA
+umap_df$theta <- NA
+umap_df$x <- NA
+umap_df$y <- NA
+
+# Define the number of cells for each lineage
+num_cells_lineage_1 <- sum(umap_df$lineage == 1)
+num_cells_lineage_2 <- sum(umap_df$lineage == 2)
+
+# r for lineage 1 is directly inherited from the time point
+# r for lineage 2 is randomized
+umap_df$r[umap_df$lineage == 1] <- sqrt(umap_df$time[umap_df$lineage == 1]) * 30
+umap_df$r[umap_df$lineage == 2] <- runif(num_cells_lineage_2, min = 0, max = 1000)
+
+# theta for lineage 1 is between 40-50
+# theta for lineage 2 is between 0-90
+umap_df$theta[umap_df$lineage == 1] <- runif(nrow(umap_df), 0, 360)
+umap_df$theta[umap_df$lineage == 2] <- runif(nrow(umap_df), 0, 360)
+umap_df$x <- umap_df$r * cos(umap_df$theta * pi / 180)
+umap_df$y <- umap_df$r * sin(umap_df$theta * pi / 180)
+
+# Display the updated data frame
+print(umap_df)
+```
+
+```{r}
+ggplot(umap_df, aes(x = x, y = y, color = factor(lineage))) +
+  geom_point(size = 1) +
+  labs(x = "X", y = "Y", title = "Spatial Plot Colored by Lineage") +
+  scale_color_manual(values = c("1" = "blue", "2" = "red"), name = "Lineage") +
+  theme_minimal() + theme(aspect.ratio=1)
+```
+
+```{r}
+ggplot(umap_df, aes(x = x, y = y, color = Cell_Type)) +
+  geom_point(size = 2) +
+  labs(x = "X", y = "Y", title = "Spatial Plot Colored by Cell Type") +
+  scale_color_manual(values = rainbow(length(unique(umap_df$Cell_Type))), name = "Cell Type") +
+  theme_minimal() + theme(aspect.ratio=1)
+```
+
+```{r}
+ggplot(umap_df_subset, aes(x = x, y = y, color = Cell_Type)) +
+  geom_point(size = 2) +
+  labs(x = "X", y = "Y", title = "Spatial Plot of Cell Types in Lineage 2") +
+  scale_color_manual(values = custom_colors, name = "Cell Type") +
+  theme_minimal() +
+  theme(
+    aspect.ratio = 1,
+    panel.grid = element_blank() # Remove all grid lines
+  )
+```
+
+```{r}
+umap_df_subset <- subset(umap_df, lineage == 2)
+umap_df_subset$x <- umap_df_subset$x / 1000
+umap_df_subset$y <- umap_df_subset$y / 1000
+
+# Define the custom color palette
+custom_colors <- c("H" = "#B24D5C",  # Red-Pink
+                   "I" = "#917242",  # Brown
+                   "J" = "#6B874B")  # Green
+
+# Plot the spatial distribution for lineage 2
+ggplot(umap_df_subset, aes(x = x, y = y, color = Cell_Type)) +
+  geom_point(size = 2) +
+  labs(x = "X", y = "Y") +
+  scale_color_manual(values = custom_colors, name = "Cell Type") +
+  scale_x_continuous(breaks = seq(-1, 1, by = 0.5)) +  # Add tick marks for X-axis
+  scale_y_continuous(breaks = seq(-1, 1, by = 0.5)) +  # Add tick marks for Y-axis
+  theme_minimal() + 
+  theme(
+    aspect.ratio = 1,
+    plot.title = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Add boundary
+    axis.ticks = element_line(size = 0.5, color = "black"),             # Customize tick marks
+    axis.ticks.length = unit(0.2, "cm")                                # Adjust tick length
+  )
+```
+
+```{r}
+ggplot(umap_df_subset, aes(y = Cell_Type, x = r, fill = Cell_Type)) +
+  geom_violin(trim = TRUE, scale = "width", alpha = 0.7) +  # Horizontal violin
+  geom_boxplot(width = 0.1, outlier.shape = NA, alpha = 0.5) +  # Optional boxplot inside violin
+  labs(y = "Cell Type", x = "Radial Distance (r)", fill = "Cell Type") +
+  theme_minimal() +
+  scale_fill_manual(values = custom_colors) +  # Use custom colors
+  theme(
+    aspect.ratio = 1,
+    plot.title = element_blank(),
+    panel.grid = element_blank(),
+    panel.border = element_rect(color = "black", fill = NA, size = 1),  # Add boundary
+    axis.ticks = element_line(size = 0.5, color = "black"),             # Customize tick marks
+    axis.ticks.length = unit(0.2, "cm"),                               # Adjust tick length
+    axis.text.y = element_text(size = 10)                              # Adjust Y-axis labels size
+  )
+```
+
+## Prepare input file
+
+```{r}
+export_df <- umap_df
+export_df <- data.frame(Cell_ID = rownames(export_df), export_df, row.names = NULL)
+export_df <- data.frame(export_df[,1], Sample = "Simulation", export_df[, -1])
+names(export_df)[1] <- "Cell_ID"
+export_df
+```
+
+```{r}
+write.csv(export_df, "full_simulation_data_with_noise.csv", row.names = FALSE)
+```
