@@ -67,7 +67,6 @@ xenium <- filterGiotto(xenium,
 # Number of cells removed:  4215  out of  167780 
 # Number of feats removed:  0  out of  313 
 
-
 ##%######################################################%##
 #                                                          #
 ####                    Save object                     ####
@@ -109,19 +108,23 @@ write.table(dataset_table[dataset_table$x > 3000 & dataset_table$x < 4500  & dat
 conda activate ONTraC_v1
 
 ## bash code
-ONTraC -d dataset.csv \
---preprocessing-dir selection/data_xenium/preprocessing_dir \
+ONTraC --meta-input dataset.csv \
+--NN-dir selection/output_xenium/NN \
 --GNN-dir selection/output_xenium/GNN \
---NTScore-dir selection/output_xenium/NTScore \
+--NT-dir selection/output_xenium/NT \
 --device cpu --epochs 300 -s 42 --patience 100 \
 --min-delta 0.001 --min-epochs 50 --lr 0.03 --hidden-feats 4 \
--k 4 --n-neighbors 200 --beta 0.3 | tee xenium_final.log
+-k 6 --n-neighbors 50 --n-gcn-layers 2 \
+--modularity-loss-weight 0.3 \
+--regularization-loss-weight 1 --purity-loss-weight 300 \
+--beta 0.03 > xenium_final.log
 
-ONTraC_analysis -d dataset.csv \
---preprocessing-dir selection/data_xenium/preprocessing_dir \
+
+ONTraC_analysis --meta-input dataset.csv \
+--NN-dir selection/output_xenium/NN \
 --GNN-dir selection/output_xenium/GNN \
---NTScore-dir selection/output_xenium/NTScore \
--o selection/analysis_xenium -r True -l xenium_final.log
+--NT-dir selection/output_xenium/NT \
+-o selection/analysis_xenium -r True > xenium_analysis.log
 
 
 ##%######################################################%##
@@ -135,13 +138,20 @@ dataset <- read.csv("dataset.csv")
 xenium <- subsetGiotto(xenium,
                        cell_ids = dataset3$Cell_ID)
 
-##%######################################################%##
-#                                                          #
-####                       Plots                        ####
-#                                                          #
-##%######################################################%##
-
 spatPlot2D(xenium,
            cell_color = "cell_types",
            point_size = 2)
 
+expression_matrix <- getExpression(xenium,
+                                   values = "raw",
+                                   output = "matrix")
+
+write.csv(as.matrix(expression_matrix), "data/xenium/expression_matrix.csv",
+          row.names = TRUE)
+
+expression_matrix <- getExpression(xenium,
+                                   values = "normalized",
+                                   output = "matrix")
+
+write.csv(as.matrix(expression_matrix), "data/xenium/normalized_expression_matrix.csv",
+          row.names = TRUE)

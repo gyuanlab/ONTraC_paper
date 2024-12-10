@@ -1,0 +1,27 @@
+##################################################################################
+
+         ▄▄█▀▀██   ▀█▄   ▀█▀ █▀▀██▀▀█                   ▄▄█▀▀▀▄█
+        ▄█▀    ██   █▀█   █     ██    ▄▄▄ ▄▄   ▄▄▄▄   ▄█▀     ▀
+        ██      ██  █ ▀█▄ █     ██     ██▀ ▀▀ ▀▀ ▄██  ██
+        ▀█▄     ██  █   ███     ██     ██     ▄█▀ ██  ▀█▄      ▄
+         ▀▀█▄▄▄█▀  ▄█▄   ▀█    ▄██▄   ▄██▄    ▀█▄▄▀█▀  ▀▀█▄▄▄▄▀
+
+                        version: 1.1.0.rc2
+
+##################################################################################
+09:58:29 --- INFO: ------------------ RUN params memo ------------------ 
+09:58:29 --- INFO:             -------- I/O options -------             
+09:58:29 --- INFO: Niche network output directory:  selection/output_xenium/NN
+09:58:29 --- INFO: GNN output directory:  selection/output_xenium/GNN
+09:58:29 --- INFO: Niche trajectory output directory:  selection/output_xenium/NT
+09:58:29 --- INFO: Output directory:  selection/analysis_xenium
+09:58:29 --- INFO: Meta data file:  dataset3.csv
+09:58:29 --- INFO: ---------------- Visualization options ----------------
+09:58:29 --- INFO: Reverse the NT score during visualization: True
+09:58:29 --- INFO: Plot each sample separately: False
+09:58:29 --- INFO: Scale factor control the size of spatial-based plots: 1.0
+09:58:29 --- INFO: ---------------- Suppress options ----------------
+09:58:29 --- INFO: Suppress the cell type composition visualization: False
+09:58:29 --- INFO: Suppress the niche cluster loadings visualization: False
+09:58:29 --- INFO: Suppress the niche trajectory related visualization: False
+09:58:29 --- INFO: --------------- RUN params memo end ----------------- 
