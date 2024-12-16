@@ -15,5 +15,5 @@ Wen Wang1,\*, Shiwei Zheng1,\*, Sujung Crystal Shin1, Joselyn Cristina Chávez-F
 - [ONTraC GitHub](https://github.com/gyuanlab/ONTraC)
 - [ONTraC PyPI](https://pypi.org/project/ONTraC/)
 - [ONTraC Zenodo](https://doi.org/10.5281/zenodo.14171604)
-- [ONTraC wesite](https://ontrac-website-template.readthedocs.io/)
+- [ONTraC wesite](https://ontrac-website.readthedocs.io/en/latest/)
 - [IO files for reproducing](https://doi.org/10.5281/zenodo.11186619)
