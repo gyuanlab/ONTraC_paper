@@ -330,3 +330,13 @@ ontrac_input
 ```{r}
 write.table(ontrac_input, file = "simulation_linear_ontrac_input.csv", sep=",",row.names = FALSE)
 ```
+
+## Generate ground truth
+
+```{r}
+ground_truth <- data.table()
+ground_truth$Cell_ID <- rownames(pca_df)
+ground_truth$Ground_Truth <- pca_df$x
+
+write.table(ground_truth, file = "simulation_linear_ground_truth.csv", sep = ",", row.names = FALSE)
+```
