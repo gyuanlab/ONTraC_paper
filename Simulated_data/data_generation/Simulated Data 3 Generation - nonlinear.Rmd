@@ -324,3 +324,34 @@ ontrac_input
 ```{r}
 write.table(ontrac_input, file = "simulation_nonlinear_ontrac_input.csv", sep=",",row.names = FALSE)
 ```
+
+## Generate ground truth
+
+```{r}
+library(dplyr)
+
+scaled_trajectory_flow <- function(x) {
+  return(0.1 * (10 * x - 5)^2 / 10)
+}
+
+calculate_trajectory <- function(x, y) {
+  quadratic_value <- scaled_trajectory_flow(x)
+  trajectory <- y / (1 + quadratic_value)
+  return(max(0, min(1, trajectory)))
+}
+
+pca_df <- pca_df %>%
+  rowwise() %>%
+  mutate(Ground_Truth_Trajectory = calculate_trajectory(x, y)) %>%
+  ungroup()
+
+print(pca_df)
+```
+
+```{r}
+ground_truth <- data.table()
+ground_truth$Cell_ID <- rownames(pca_df)
+ground_truth$Ground_Truth <- pca_df$Ground_Truth_Trajectory
+
+write.table(ground_truth, file = "simulation_nonlinear_ground_truth.csv", sep = ",", row.names = FALSE)
+```
