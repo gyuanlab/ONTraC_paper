@@ -322,7 +322,7 @@ ggplot(umap_df_subset, aes(y = Cell_Type, x = r, fill = Cell_Type)) +
 ## Prepare input file
 
 ```{r}
-export_df <- umap_df
+export_df <- umap_df_subset
 export_df <- data.frame(Cell_ID = rownames(export_df), export_df, row.names = NULL)
 export_df <- data.frame(export_df[,1], Sample = "Simulation", export_df[, -1])
 names(export_df)[1] <- "Cell_ID"
@@ -331,4 +331,14 @@ export_df
 
 ```{r}
 write.csv(export_df, "full_simulation_data_with_noise.csv", row.names = FALSE)
+```
+
+## Generate ground truth
+
+```{r}
+ground_truth <- data.table()
+ground_truth$Cell_ID <- export_df$Cell_ID
+ground_truth$Ground_Truth <- umap_df_subset$r
+
+write.table(ground_truth, file = "simulation_radial_ground_truth.csv", sep = ",", row.names = FALSE)
 ```
